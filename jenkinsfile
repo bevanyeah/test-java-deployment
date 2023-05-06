@@ -1,0 +1,137 @@
+pipeline {
+    agent any
+    
+    environment {
+        scannerHome = tool 'sonarscanner_ms'
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                echo "===== Building ====="
+                git url: 'https://github.com/bevanyeah/test-java-deployment'
+                bat "mvn clean verify"
+            }
+            post {
+                always {
+                    echo 'here'
+                }
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo "===== Unit Tests ====="
+                bat "mvn -Dtest=UnitTest test"
+                echo "===== Integration Tests ====="
+                bat "mvn -Dtest=IntegrationTest test"
+             }
+            post {
+                success {
+                    emailext (
+                        subject: 'Pipeline Notification',
+                        body: 'Unit and Integration checks complete [SUCCESS}',
+                        to: 'bfairleigh@deakin.edu.au',
+                        replyTo: 'bfairleigh@deakin.edu.au',
+                        attachLog: true
+                    )
+                }
+                failure {
+                    emailext (
+                        subject: 'Pipeline Notification',
+                        body: 'Unit and Integration checks complete [FAILED}',
+                        to: 'bfairleigh@deakin.edu.au',
+                        replyTo: 'bfairleigh@deakin.edu.au',
+                        attachLog: true
+                    )
+                }
+            }
+             
+        }
+        
+        stage('Code Quality Check') {
+            steps {
+                echo "===== SonarQube Quality Check ====="
+                withSonarQubeEnv('my_sonar_server') {
+                    echo "${scannerHome}"
+                    bat "sonar-scanner -Dsonar.projectKey=bevan-test_bevan-test -Dsonar.organization=bevan-test -Dsonar.sources=./src/main/java/com/mycompany/app -Dsonar.host.url=https://sonarcloud.io -Dsonar.login=8e994a7fb6fba2f49c8ac5a9bbf4b1a60c0ca5d7 -Dsonar.java.binaries=./target/classes/com/mycompany/app"
+                }
+                
+            }
+                
+            
+        }
+                
+              
+        stage('Security Check') {
+            steps {
+                echo "===== Security Check ====="
+					dependencyCheck additionalArguments: ''' 
+                    -o "./" 
+                    -s "./"
+                    -f "ALL" 
+                    --prettyPrint''', odcInstallation: 'dep-check'
+                    
+                dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+            }
+            post {
+                success {
+                    emailext (
+                        subject: 'Pipeline Notification',
+                        body: 'Security checks complete [SUCCESS}',
+                        to: 'bfairleigh@deakin.edu.au',
+                        replyTo: 'bfairleigh@deakin.edu.au',
+                        attachLog: true
+                    )
+                }
+                failure {
+                    emailext (
+                        subject: 'Pipeline Notification',
+                        body: 'Security checks complete [FAILED}',
+                        to: 'bfairleigh@deakin.edu.au',
+                        replyTo: 'bfairleigh@deakin.edu.au',
+                        attachLog: true
+                    )
+                }
+            }
+   
+        }
+                
+
+        stage('Deploy') {
+            steps {
+                echo "===== Deploy to Staging ====="
+                bat 'ssh -i staging.pem -o StrictHostKeyChecking=no ec2-user@ec2-13-211-180-117.ap-southeast-2.compute.amazonaws.com & cd test-java-deployment & git pull origin master & mvn clean install'
+                
+            }
+        }
+
+        stage('Integration Test on Staging') {
+            steps {
+                echo "===== Integration Test on Staging ====="
+                bat 'ssh -i staging.pem -o StrictHostKeyChecking=no ec2-user@ec2-13-211-180-117.ap-southeast-2.compute.amazonaws.com & cd test-java-deployment & mvn -Dtest=IntegrationTest -DfailIfNoTests=false test'
+                
+            }
+        }
+        
+        stage('Deploy to Production') {
+            steps {
+                echo "===== Deploy to Production ====="
+                bat 'ssh -i production.pem -o StrictHostKeyChecking=no ec2-user@ec2-13-239-10-59.ap-southeast-2.compute.amazonaws.com & cd test-java-deployment & git pull origin master & mvn clean install'
+                
+            }
+        }
+    }
+    
+    post {
+		always {
+			emailext (
+				subject: 'Pipeline Notification',
+				body: 'Deployment to production compelete',
+				to: 'bfairleigh@deakin.edu.au',
+				replyTo: 'bfairleigh@deakin.edu.au',
+				attachLog: true
+			)
+		}
+	}
+}
